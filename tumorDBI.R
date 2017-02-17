@@ -68,3 +68,8 @@ currentSNVs <- mysqlQuery("SELECT vc.*,si.sampleID,si.pairID FROM variants_cance
 # Coverage plot
 ###########################
 
+cvgExon <- mysqlQuery("select chr,start,gene_exon,coverage from exonCov as ec inner join sampleInfo as si on si.postprocID = ec.postprocID where si.sampleID = '294906'  order by chr,start;")
+chr21Cvg <- cvgExon[which(cvgExon$chr == 21),]
+barplot(chr21Cvg$coverage, horiz = TRUE, names.arg = chr21Cvg$gene_exon, las=1, col=ifelse(chr21Cvg$coverage<50,"red","blue"), cex.names = .5)
+
+
