@@ -1,0 +1,367 @@
+---
+title: "Cancer Panel Interpretation Assistant Kit"
+output: html_notebook
+---
+
+Heatmap of Pairwise Common Substitutions of all Tumor Samples 
+
+```{r fig.width = 6, fig.height = 5, warning = FALSE}
+#moleID <- c('288555')
+moleID <- c('297368')
+
+library(RMySQL)
+library(repr)
+library(ggplot2)
+library(reshape2)
+library(plyr)
+library(dplyr)
+library(DT)
+
+mysqlQuery <- function (query) {
+  DB <- dbConnect(MySQL(), user='ashlien', password='Re4Cna$c', dbname='clinicalC', host='172.27.20.20', port=5029)
+  rs <- dbSendQuery(DB, query)
+  result <- fetch(rs, -1)
+  dbDisconnect(DB)
+  return(result)
+}
+
+shareSNV <- mysqlQuery("SELECT CONCAT_WS('_', si.sampleID,si.pairID) as sampleID,vc.interID FROM variants_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name cross join (select vc.interID,count(*) from variants_cancer as vc inner join sampleInfo as si on si.postprocID = vc.tumor_name where si.pairID > 0 and si.pairID < 9900 AND (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream'))) group by vc.interID HAVING count(*) > 1) tmp where tmp.interID = vc.interID AND si.pairID > 0 and si.pairID < 9900 and (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream')))")
+shareSNV$sampleID <- sub(moleID[1], paste('>>', moleID[1]), shareSNV$sampleID)
+
+sampleSNV <- mysqlQuery("SELECT CONCAT_WS('_', si.sampleID,si.pairID) as sampleID, count(*) as count FROM variants_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name WHERE si.pairID > 0 AND si.pairID < 9900 AND (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream'))) group by sampleID")
+sampleSNV$sampleID <- sub(moleID[1], paste('>>', moleID[1]), sampleSNV$sampleID)
+
+heat <- matrix(0, length(unique(sampleSNV$sampleID)), length(unique(sampleSNV$sampleID)))
+colnames(heat) <- unique(sampleSNV$sampleID)
+rownames(heat) <- unique(sampleSNV$sampleID)
+
+for (i in 1:length(sampleSNV$sampleID)) {
+  heat[sampleSNV$sampleID[i], sampleSNV$sampleID[i]] = sampleSNV$count[i]
+}
+
+for ( val1 in 1:(length(shareSNV$sampleID)-1) ) { for (val2 in (val1+1):length(shareSNV$sampleID)) { if (shareSNV$interID[val1] == shareSNV$interID[val2]) { heat[shareSNV$sampleID[val1],  shareSNV$sampleID[val2]] = heat[shareSNV$sampleID[val1],  shareSNV$sampleID[val2]] + 1 ; heat[shareSNV$sampleID[val2],  shareSNV$sampleID[val1]] = heat[shareSNV$sampleID[val2],  shareSNV$sampleID[val1]] + 1} }}
+
+heat.m <- melt(heat)
+
+ggplot(heat.m, aes(Var1, Var2, fill = value)) + geom_tile(aes(fill = value)) +  geom_text(data=subset(heat.m, value > 0), aes(label = value), size = 1.5) + scale_fill_gradient(low = "white", high = "red") + ylab('SampleID_KiCS') + xlab("SampleID_KiCS") + theme(axis.text=element_text(size=6), axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+
+
+Heatmap of Pairwise Common INDELs of all Tumor Samples 
+
+```{r fig.width = 6, fig.height = 5, warning = FALSE}
+shareINDEL <- mysqlQuery("SELECT CONCAT_WS('_', si.sampleID,si.pairID) as sampleID,vc.interID FROM indel_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name cross join (select vc.interID,count(*) from indel_cancer as vc inner join sampleInfo as si on si.postprocID = vc.tumor_name where si.pairID > 0 and si.pairID < 9900 AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01))) group by vc.interID HAVING count(*) > 1) tmp where tmp.interID = vc.interID AND si.pairID > 0 AND si.pairID < 9900 AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01)))")
+shareINDEL$sampleID <- sub(moleID[1], paste('>>', moleID[1]), shareINDEL$sampleID)
+
+sampleINDEL <- mysqlQuery("SELECT CONCAT_WS('_', si.sampleID,si.pairID) as sampleID, count(*) as count FROM indel_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name WHERE si.pairID > 0 AND si.pairID < 9900 AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01))) group by sampleID")
+sampleINDEL$sampleID <- sub(moleID[1], paste('>>', moleID[1]), sampleINDEL$sampleID)
+
+heat <- matrix(0, length(unique(sampleINDEL$sampleID)), length(unique(sampleINDEL$sampleID)))
+colnames(heat) <- unique(sampleINDEL$sampleID)
+rownames(heat) <- unique(sampleINDEL$sampleID)
+
+for (i in 1:length(sampleINDEL$sampleID)) {
+  heat[sampleINDEL$sampleID[i], sampleINDEL$sampleID[i]] = sampleINDEL$count[i]
+}
+
+for ( val1 in 1:(length(shareINDEL$sampleID)-1) ) { for (val2 in (val1+1):length(shareINDEL$sampleID)) { if (shareINDEL$interID[val1] == shareINDEL$interID[val2]) { heat[shareINDEL$sampleID[val1],  shareINDEL$sampleID[val2]] = heat[shareINDEL$sampleID[val1],  shareINDEL$sampleID[val2]] + 1 ; heat[shareINDEL$sampleID[val2],  shareINDEL$sampleID[val1]] = heat[shareINDEL$sampleID[val2],  shareINDEL$sampleID[val1]] + 1} }}
+
+heat.m <- melt(heat)
+
+ggplot(heat.m, aes(Var1, Var2, fill = value)) + geom_tile(aes(fill = value)) +  geom_text(data=subset(heat.m, value > 0), aes(label = value), size = 1.5) + scale_fill_gradient(low = "white", high = "red") + ylab('SampleID_KiCS') + xlab("SampleID_KiCS") + theme(axis.text=element_text(size=6), axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+
+
+Overall view of nonsysnonymous genes
+```{r}
+all_Nonsynon = mysqlQuery("SELECT * from (SELECT si.sampleID, vc.hgnc_gene FROM indel_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name WHERE si.pairID > 0 AND si.pairID < 9900 AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01))) AND annovar_exonic_func REGEXP 'frameshift deletion|frameshift insertion|nonframeshift deletion|nonframeshift insertion|stopgain SNV|stoploss SNV' UNION SELECT si.sampleID, vc.hgnc_gene FROM variants_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name WHERE si.pairID > 0 AND si.pairID < 9900 AND (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream'))) AND annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing') tmp GROUP by sampleID,hgnc_gene")
+
+allGenes <- matrix(NA, length(unique(all_Nonsynon$hgnc_gene)), length(unique(all_Nonsynon$sampleID)))
+colnames(allGenes) <- unique(all_Nonsynon$sampleID)
+rownames(allGenes) <- unique(all_Nonsynon$hgnc_gene)
+for (i in 1:length(all_Nonsynon$sampleID)) {
+  allGenes[all_Nonsynon$hgnc_gene[i], all_Nonsynon$sampleID[i]] <- TRUE
+}
+
+order_names <- unique(all_Nonsynon$sampleID)
+order_names <- order_names[ ! order_names %in% moleID ]
+order_names <- c(moleID[1], order_names)
+allGenes <- allGenes[,order_names]
+
+allGenes <- cbind(allGenes, Count = apply(allGenes, 1, function(x) sum(!is.na(x))))
+allGenes <- allGenes[ which(allGenes[, 'Count'] > "1"), ]
+allGenes <- allGenes[ order(-allGenes[,ncol(allGenes)]),]
+
+datatable(allGenes) %>% formatStyle(moleID,  color = 'red', backgroundColor = 'orange', fontWeight = 'bold')
+
+```
+
+```{r fig.width = 6, fig.height = 16, warning = FALSE}
+allGenes <- melt(allGenes)
+allGenes <- allGenes[ which(allGenes$value == 1), ]
+allGenes[ which(allGenes$Var2 == moleID[1]),]$value <- 2
+allGenes$value <- factor(allGenes$value, levels = allGenes$value) 
+allGenes %>% ggplot(aes(Var2, Var1))  + geom_point(shape = 4, aes(color=value)) + theme(axis.text=element_text(size=6), axis.text.x = element_text(angle = 90, hjust = 1)) + theme(legend.position="none")
+#+ facet_wrap(  ~ Gene_Cvg, scales = "free") + ggtitle(paste('Coverage of all exons in the cancer panel for sample ', moleID[1], sep='')) + theme(plot.title = element_text(hjust = 0.5), plot.margin = unit(c(0.1, 0, 0, -0.8), "line"), panel.spacing = unit(0, "lines"), strip.text = element_text(size=5, hjust = 0), strip.background = element_rect(fill = "white", color = "white", size = 2)) + theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(), strip.text.y = element_text(angle = 0)) + theme(axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.text.x  = element_blank(), axis.text.y  = element_blank()) + xlab(paste("Average Coverage is ", cvgSum$meanCvgGP[1], "X, (w/ ", cvgSum$perbasesAbove30XGP[1], "% bases > 500X)\n", "Exons Coverage w/ ", nrow(covs[covs$good_cov == TRUE,]) , " > 50X, ", nrow(covs[covs$bad_cov == TRUE,]), " < 50X", sep = ''))
+```
+
+
+Current Investigated sample and the nonsynonymous Mutations on the same gene 
+
+```{r  warning = FALSE}
+rows = function(tab) lapply(
+  seq_len(nrow(tab)),
+  function(i) unclass(tab[i,,drop=F])
+)
+
+cmdQuery <- paste("SELECT vc.hgnc_gene, vc.annovar_chr, vc.annovar_start, vc.annovar_end, vc.mutationType, vc.annovar_func, vc.annovar_ens_func, vc.aa, vc.cosmic_census, si.sampleID, ip.interpretation, vc.tumor_f,  CONCAT_WS('_', vc.interID, vc.ref_allele, vc.alt_allele) as newinterID FROM variants_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name LEFT JOIN interpretation_cancer as ip on ip.postprocID = vc.tumor_name AND ip.interID = vc.interID CROSS JOIN ( SELECT vc.ensembl_gene FROM variants_cancer as vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name WHERE si.sampleID = '", moleID[1], "' AND (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream')))) AS tmp WHERE (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream'))) AND si.pairID > 0 AND si.pairID < 9900 AND ((vc.ensembl_gene = tmp.ensembl_gene AND vc.annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing') OR si.sampleID = '", moleID[1], "') GROUP by vc.interID,tumor_name", collapse = "", sep = '')
+curInvestSNV <- mysqlQuery(cmdQuery)
+interTrans <- c("7" = "Unknown", "6" = "Class-E", "5" = "Class-D", "4" = "Class-C", "3" = "Class-B", "2" = "Class-A", "1" = "Unknown", "0" = "Unknown")
+
+
+curInvestSNV$interpretation <- as.character(curInvestSNV$interpretation)
+curInvestSNV$interpretation <- revalue(curInvestSNV$interpretation, interTrans)
+curInvestSNV$cosmic_census[curInvestSNV$cosmic_census == 1] <- "T"
+curInvestSNV$cosmic_census[curInvestSNV$cosmic_census == 0] <- "F"
+curInvestSNV$Mutation <- NULL
+index <- curInvestSNV$aa == ""
+curInvestSNV$Mutation[index] <- paste(curInvestSNV$annovar_chr[index], ":", curInvestSNV$annovar_start[index], "-", curInvestSNV$annovar_end[index] , " (", curInvestSNV$mutationType[index], ")<br/>func: ", curInvestSNV$annovar_func[index], "<br/>ens func: ", curInvestSNV$annovar_ens_func[index], sep = '')
+index <- curInvestSNV$aa != ""
+curInvestSNV$Mutation[index] <- paste(curInvestSNV$annovar_chr[index], ":", curInvestSNV$annovar_start[index], "-", curInvestSNV$annovar_end[index] , " (", curInvestSNV$mutationType[index], ")<br/>func: ", curInvestSNV$annovar_func[index], "<br/>ens func: ", curInvestSNV$annovar_ens_func[index], "<br/>AA: ", curInvestSNV$aa[index], sep = '')
+curInvestSNV$MuType <- "substitution"
+otherSNV <- curInvestSNV[ which(curInvestSNV$sampleID != moleID[1]), ]
+otherSNV <- otherSNV[order(otherSNV$sampleID), ]
+currentSNV = curInvestSNV[ which(curInvestSNV$sampleID == moleID[1]), ]
+snvPrint <- currentSNV[c(1, 15, 14, 11,9,12)]
+snvPrint$other <- ""
+for (i in rows(otherSNV)) {
+  snvPrint$other[ snvPrint$hgnc_gene == i$hgnc_gene ] <- paste(i$aa, "(", i$sampleID, "), ", snvPrint$other[ snvPrint$hgnc_gene == i$hgnc_gene ], sep = "")
+}
+
+cmdQuery <- paste("SELECT vc.hgnc_gene, vc.annovar_chr, vc.annovar_start, vc.annovar_end, vc.annovar_ref, vc.annovar_alt, vc.gatk_mutation_type as mutationType, vc.annovar_func, vc.annovar_ens_func, vc.aa, vc.cosmic_census, si.sampleID, ip.interpretation, vc.gatk_tumour_allele_fraction FROM indel_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name LEFT JOIN interpretation_cancer as ip on ip.postprocID = vc.tumor_name AND ip.interID = vc.interID CROSS JOIN ( SELECT vc.ensembl_gene FROM indel_cancer as vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name WHERE si.sampleID = '", moleID[1] ,"' AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01)))) AS tmp WHERE (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01))) AND si.pairID > 0 AND si.pairID < 9900 AND ((vc.ensembl_gene = tmp.ensembl_gene AND vc.annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing') OR si.sampleID = '", moleID[1] ,"') GROUP by vc.interID,tumor_name", collapse = "", sep = '')
+curInvestINDEL <- mysqlQuery(cmdQuery)
+curInvestINDEL$interpretation <- as.character(curInvestINDEL$interpretation)
+curInvestINDEL$interpretation <- revalue(curInvestINDEL$interpretation, interTrans)
+curInvestINDEL$cosmic_census[curInvestINDEL$cosmic_census == 1] <- "T"
+curInvestINDEL$cosmic_census[curInvestINDEL$cosmic_census == 0] <- "F"
+curInvestINDEL$Mutation <- NULL
+index <- curInvestINDEL$aa == ""
+curInvestINDEL$Mutation[index] <- paste(curInvestINDEL$annovar_chr[index], ":", curInvestINDEL$annovar_start[index], "-", curInvestINDEL$annovar_end[index] , " ( ", curInvestINDEL$annovar_ref, " > ", curInvestINDEL$annovar_alt, " )<br/>func: ", curInvestINDEL$annovar_func[index], "<br/>ens func: ", curInvestINDEL$annovar_ens_func[index], sep = '')
+index <- curInvestINDEL$aa != ""
+curInvestINDEL$Mutation[index] <- paste(curInvestINDEL$annovar_chr[index], ":", curInvestINDEL$annovar_start[index], "-", curInvestINDEL$annovar_end[index] , " ( ", curInvestINDEL$annovar_ref, " > ", curInvestINDEL$annovar_alt, " )<br/>func: ", curInvestINDEL$annovar_func[index], "<br/>ens func: ", curInvestINDEL$annovar_ens_func[index], "<br/>AA: ", curInvestINDEL$aa[index], sep = '')
+indelTrans <- c("ins" = "insertion", "del" = "deletion")
+curInvestINDEL$mutationType <- revalue(curInvestINDEL$mutationType, indelTrans)
+otherINDEL = curInvestINDEL[ which( curInvestINDEL$sampleID != moleID[1]), ]
+currentINDEL = curInvestSNV[ which(curInvestSNV$sampleID == moleID[1]), ]
+indelPrint <- curInvestINDEL[c(1,7,15,13,11,14)]
+indelPrint$other <- ""
+for (i in rows(otherINDEL)) {
+  indelPrint$other[ indelPrint$hgnc_gene == i$hgnc_gene ] <- paste(i$aa, "(", i$sampleID, "), ", indelPrint$other[ indelPrint$hgnc_gene == i$hgnc_gene ], sep = "")
+}
+
+printTable <- as.data.frame(mapply(c, snvPrint, indelPrint ))
+
+datatable(printTable, escape = 2, rownames = FALSE,  colnames = c('Gene', 'MutationType', 'Mutation', 'Interpretation', 'Cancer Gene', 'VAF', 'Mutation on Others'))
+```
+
+
+Common substitutions between current investigated sample and other samples:
+
+```{r warning = FALSE}
+cmdQuery <- paste("SELECT vc.hgnc_gene, vc.annovar_chr, vc.annovar_start, vc.annovar_end, vc.mutationType, vc.annovar_func, vc.annovar_ens_func, vc.aa, vc.cosmic_census, si.sampleID, ip.interpretation, vc.tumor_f, vc.interID, CONCAT_WS('_', vc.interID, vc.ref_allele, vc.alt_allele) as newinterID FROM variants_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name LEFT JOIN interpretation_cancer as ip on ip.postprocID = vc.tumor_name AND ip.interID = vc.interID cross join (select vc.interID,count(*) from variants_cancer as vc inner join sampleInfo as si on si.postprocID = vc.tumor_name cross join (SELECT vc.interID from variants_cancer as vc inner join sampleInfo as si on si.postprocID = vc.tumor_name where (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream'))) AND si.sampleID in ('", moleID[1], "' )) as su where su.interID = vc.interID AND si.pairID > 0 and si.pairID < 9900 AND (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream'))) group by vc.interID HAVING count(*) > 1) tmp where tmp.interID = vc.interID AND si.pairID > 0 and si.pairID < 9900 and (((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%clin%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%clin%') AND judgement = 1) OR (( annovar_1000g is NULL OR annovar_1000g < 0.01 ) AND ( annovar_esp is NULL OR annovar_esp < 0.01) AND t_alt_count >= 10 AND  n_alt_count < 3 AND n_ref_count > 50 AND tumor_f > 0.01 AND cosmic_census = 1 AND (annovar_exonic_func REGEXP 'nonsynonymous SNV|stopgain SNV|stoploss SNV|splicing' OR  annovar_func REGEXP 'splicing|upstream')))", collapse = "", sep = '')
+commonSNVs <- mysqlQuery(cmdQuery)
+
+interTrans <- c("7" = "Unknown", "6" = "Class-E", "5" = "Class-D", "4" = "Class-C", "3" = "Class-B", "2" = "Class-A", "1" = "Unknown", "0" = "Unknown")
+
+
+commonSNVs$interpretation <- as.character(commonSNVs$interpretation)
+commonSNVs$interpretation <- revalue(commonSNVs$interpretation, interTrans)
+commonSNVs$cosmic_census[commonSNVs$cosmic_census == 1] <- "T"
+commonSNVs$cosmic_census[commonSNVs$cosmic_census == 0] <- "F"
+commonSNVs$Mutation <- NULL
+index <- commonSNVs$aa == ""
+commonSNVs$Mutation[index] <- paste(commonSNVs$annovar_chr[index], ":", commonSNVs$annovar_start[index], "-", commonSNVs$annovar_end[index] , " (", commonSNVs$mutationType[index], ")<br/>func: ", commonSNVs$annovar_func[index], "<br/>ens func: ", commonSNVs$annovar_ens_func[index], sep = '')
+index <- commonSNVs$aa != ""
+commonSNVs$Mutation[index] <- paste(commonSNVs$annovar_chr[index], ":", commonSNVs$annovar_start[index], "-", commonSNVs$annovar_end[index] , " (", commonSNVs$mutationType[index], ")<br/>func: ", commonSNVs$annovar_func[index], "<br/>ens func: ", commonSNVs$annovar_ens_func[index], "<br/>AA: ", commonSNVs$aa[index], sep = '')
+commonSNVs$MuType <- "substitution"
+printCommonSNVs <- commonSNVs[ which(commonSNVs$sampleID == moleID[1]), ]
+otherCommonSNVs <- commonSNVs[ which(commonSNVs$sampleID != moleID[1]), ]
+
+sidFreq <- data.frame(table(otherCommonSNVs$sampleID))
+sidFreq <- sidFreq[order(-sidFreq$Freq), ]
+names(sidFreq)[1] <- "sampleID"
+sidFreq$sampleID <- as.character(sidFreq$sampleID)
+
+numcol <- 10
+if (length(sidFreq$sampleID) < 10) {
+    numcol <- length(sidFreq$sampleID)
+}
+finalcolnames <- c('Gene', 'MutationType', 'Mutation', 'Interpretation', 'Cancer Gene', 'VAF')
+
+for (i in 1:numcol) {
+  index1 <- otherCommonSNVs$sampleID == sidFreq$sampleID[i]
+  tempid <- paste("sampleID", i , sep = '')
+  finalcolnames <- append(finalcolnames, tempid)
+  printCommonSNVs[tempid] <- NA
+  printCommonSNVs[[tempid]][printCommonSNVs$interID %in% otherCommonSNVs$interID[index1]] <- sidFreq$sampleID[i]
+}
+printCommonSNVs$sampleCount <- apply(printCommonSNVs[17:(16+numcol)], 1, function(x) sum(!is.na(x)))
+finalcolnames <- append(finalcolnames, "sampleCount")
+printCommonSNVs <- printCommonSNVs[c(1, 16, 15, 11,9,12, 17:(17+numcol))]
+
+datatable(printCommonSNVs, escape = 2, rownames = FALSE,  colnames = finalcolnames)
+
+```
+
+
+Common INDELs between current investigated sample and other samples:
+
+```{r warning = FALSE}
+cmdQuery <- paste("SELECT vc.hgnc_gene, vc.annovar_chr, vc.annovar_start, vc.annovar_end, vc.gatk_mutation_type, vc.annovar_func, vc.annovar_ens_func, vc.aa, vc.cosmic_census, si.sampleID, ip.interpretation, vc.gatk_tumour_lod, vc.interID, CONCAT_WS('_', vc.interID, vc.annovar_ref, vc.annovar_alt) as newinterID FROM indel_cancer AS vc INNER JOIN sampleInfo AS si ON si.postprocID = vc.tumor_name LEFT JOIN interpretation_cancer as ip on ip.postprocID = vc.tumor_name AND ip.interID = vc.interID cross join (select vc.interID,count(*) from indel_cancer as vc inner join sampleInfo as si on si.postprocID = vc.tumor_name cross join (SELECT vc.interID from indel_cancer as vc inner join sampleInfo as si on si.postprocID = vc.tumor_name where (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01))) AND si.sampleID in ('", moleID[1], "' )) as su where su.interID = vc.interID AND si.pairID > 0 AND si.pairID < 9900 AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01))) group by vc.interID HAVING count(*) > 1) tmp where tmp.interID = vc.interID AND si.pairID > 0 AND si.pairID < 9900 AND (gatk_mutation_type != 'sub' AND gatk_normal_depth >= 30 AND gatk_tumour_depth >= 30 AND gatk_tumour_allele_fraction >= 0.05 AND (gatk_filter = 'PASS' OR ((gatk_filter NOT LIKE 'clustered_events' OR gatk_filter NOT LIKE 'homologous_mapping_event') AND gatk_tumour_alt_count >= 5 AND gatk_normal_allele_fraction < 0.01)))", collapse = "", sep = '')
+commonSNVs <- mysqlQuery(cmdQuery)
+
+interTrans <- c("7" = "Unknown", "6" = "Class-E", "5" = "Class-D", "4" = "Class-C", "3" = "Class-B", "2" = "Class-A", "1" = "Unknown", "0" = "Unknown")
+
+
+commonSNVs$interpretation <- as.character(commonSNVs$interpretation)
+commonSNVs$interpretation <- revalue(commonSNVs$interpretation, interTrans)
+commonSNVs$cosmic_census[commonSNVs$cosmic_census == 1] <- "T"
+commonSNVs$cosmic_census[commonSNVs$cosmic_census == 0] <- "F"
+commonSNVs$Mutation <- NULL
+index <- commonSNVs$aa == ""
+commonSNVs$Mutation[index] <- paste(commonSNVs$annovar_chr[index], ":", commonSNVs$annovar_start[index], "-", commonSNVs$annovar_end[index] , " (", commonSNVs$gatk_mutation_type[index], ")<br/>func: ", commonSNVs$annovar_func[index], "<br/>ens func: ", commonSNVs$annovar_ens_func[index], sep = '')
+index <- commonSNVs$aa != ""
+commonSNVs$Mutation[index] <- paste(commonSNVs$annovar_chr[index], ":", commonSNVs$annovar_start[index], "-", commonSNVs$annovar_end[index] , " (", commonSNVs$gatk_mutation_type[index], ")<br/>func: ", commonSNVs$annovar_func[index], "<br/>ens func: ", commonSNVs$annovar_ens_func[index], "<br/>AA: ", commonSNVs$aa[index], sep = '')
+commonSNVs$MuType <- "substitution"
+printCommonSNVs <- commonSNVs[ which(commonSNVs$sampleID == moleID[1]), ]
+otherCommonSNVs <- commonSNVs[ which(commonSNVs$sampleID != moleID[1]), ]
+
+sidFreq <- data.frame(table(otherCommonSNVs$sampleID))
+sidFreq <- sidFreq[order(-sidFreq$Freq), ]
+names(sidFreq)[1] <- "sampleID"
+sidFreq$sampleID <- as.character(sidFreq$sampleID)
+
+numcol <- 10
+if (length(sidFreq$sampleID) < 10) {
+    numcol <- length(sidFreq$sampleID)
+}
+finalcolnames <- c('Gene', 'MutationType', 'Mutation', 'Interpretation', 'Cancer Gene', 'VAF')
+
+for (i in 1:numcol) {
+  index1 <- otherCommonSNVs$sampleID == sidFreq$sampleID[i]
+  tempid <- paste("sampleID", i , sep = '')
+  finalcolnames <- append(finalcolnames, tempid)
+  printCommonSNVs[tempid] <- NA
+  printCommonSNVs[[tempid]][printCommonSNVs$interID %in% otherCommonSNVs$interID[index1]] <- sidFreq$sampleID[i]
+}
+printCommonSNVs$sampleCount <- apply(printCommonSNVs[17:(16+numcol)], 1, function(x) sum(!is.na(x)))
+finalcolnames <- append(finalcolnames, "sampleCount")
+printCommonSNVs <- printCommonSNVs[c(1, 16, 15, 11,9,12, 17:(17+numcol))]
+
+datatable(printCommonSNVs, escape = 2, rownames = FALSE,  colnames = finalcolnames)
+
+```
+
+
+Mutation Burden Plot
+```{r warning = FALSE}
+mutationBurden <- mysqlQuery("SELECT ids.sampleID, snv.count as snvH, snv.count/3.245446 AS MutationBurden FROM ( select sampleID,postprocID from sampleInfo AS si INNER JOIN variants_cancer AS vc ON si.postprocID = vc.tumor_name WHERE si.pairID >1 AND si.pairID < 9900 GROUP BY sampleID) ids LEFT JOIN (SELECT tumor_name, count(*) AS count FROM variants_cancer vc where ((t_ref_count + t_alt_count) >= 50 AND (n_ref_count + n_alt_count) >= 50 AND (annovar_complete_genomics != '' OR annovar_complete_genomics = 0 OR annovar_clinvar like '%CLIN%') AND ( annovar_1000g != '' OR annovar_1000g = 0 OR annovar_clinvar like '%CLIN%') AND judgement = 1) and length(in_cpanel) > 4 GROUP by tumor_name ) snv ON ids.postprocID = snv.tumor_name ORDER BY snvH DESC")
+
+mutationBurden <- mutate(mutationBurden, curInv = sampleID != moleID[1] )
+mutationBurden <- mutationBurden[ which(! is.na(mutationBurden$snvH)), ]
+#mutationBurden %>% ggplot(aes(x=sampleID, y=MutationBurden, fill = curInv)) + geom_bar(stat = "identity", width=.7) + scale_x_discrete(limits = mutationBurden$sampleID) +  scale_y_log10( breaks = scales::trans_breaks("log10", function(x) 10^x), labels = scales::trans_format("log10", scales::math_format(10^.x)) ) + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6), legend.position="none", panel.grid.minor = element_blank())  + labs(y = "Mutation Burden")
+
+mutationBurden %>% ggplot(aes(x=sampleID, y=MutationBurden*10, fill = curInv)) + geom_bar(stat = "identity", width=.7) + scale_x_discrete(limits = mutationBurden$sampleID) + scale_y_log10(breaks = c(1, 10, 100, 1000), labels = c("0", "1", "10", "100")) + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 6), legend.position="none", panel.grid.minor = element_blank())  + labs(y = "Mutation Burden")
+
+```
+
+
+
+Overall Coverage
+```{r warning = FALSE}
+cmdQuery <- paste("SELECT perbasesAbove1XGP as '%>1X',perbasesAbove10XGP as '%>50X',perbasesAbove20XGP as '%>200X', perbasesAbove30XGP as '%>500X' FROM sampleInfo WHERE sampleID in ('", moleID[1], "')", collapse = "", sep = '')
+cvgSum <- mysqlQuery(cmdQuery)
+#barplot(c(cvgSum$`%>1X`[1], cvgSum$`%>50X`[1], cvgSum$`%>200X`[1], cvgSum$`%>500X`[1]), main="Overall Coverage", names.arg =c("%>1X", "%>50X", "%>200X", "%>500X"), ylab="Percentage of Bases", col = "cyan")
+
+cvgBarPlot <- data.frame( items = names(cvgSum), values = c(cvgSum$`%>1X`[1], cvgSum$`%>50X`[1], cvgSum$`%>200X`[1], cvgSum$`%>500X`[1]))
+cvgBarPlot$hline <- c(NA, 97, 95, 75)
+
+itemorder <- c("%>1X",  "%>50X",  "%>200X", "%>500X")
+
+cvgBarPlot %>% ggplot(aes(x=items, y=values)) + geom_bar(stat = "identity", width=.5, fill="steelblue") + scale_x_discrete(limits = itemorder) + geom_text(aes(label=values), vjust=-.5, color="black", size=3.5)  +  theme_minimal() + geom_errorbar(aes(width=.5, ymax=hline, ymin=hline), colour="#AA0000")
+```
+
+
+
+
+exon coverage plot
+```{r fig.width = 12, fig.height = 6, warning = FALSE}
+options(warn=-1)
+cmdQuery <- paste("SELECT ec.chr,ec.start,ec.stop,ec.gene_exon,ec.coverage FROM exonCov AS ec INNER JOIN sampleInfo AS si ON si.postprocID = ec.postprocID WHERE si.sampleID ='", moleID[1], "'", collapse = "", sep = '')
+covs <- mysqlQuery(cmdQuery)
+blacklist <- mysqlQuery("SELECT lowCvgExon FROM lowCvgExon WHERE captureKit = 'cancer'")
+blacklist <- unlist(strsplit(blacklist$lowCvgExon, "; "))
+covs <- covs[ ! covs$gene_exon %in% blacklist, ]
+
+cvgSum <- mysqlQuery(paste("SELECT meanCvgGP,perbasesAbove30XGP FROM sampleInfo WHERE sampleID = '", moleID[1], "'", sep = ''))
+
+covs = mutate(covs, good_cov = coverage >= 50 )
+covs = mutate(covs, bad_cov = coverage < 50)
+covs$Gene <- sub("-.*", "", covs$gene_exon)
+covs$Exon <- sub(".*-", "", covs$gene_exon)
+covs$truec <- unsplit(lapply(split(covs, covs[c("Gene","bad_cov")]), nrow), covs[c("Gene")])
+covs$falsec <- unsplit(lapply(split(covs, covs[c("Gene","good_cov")]), nrow), covs[c("Gene")])
+covs$Gene_Cvg <- paste(covs$Gene, " (", covs$truec, "/", covs$falsec, ")", sep = '')
+covs$Gene_Cvg <- factor(covs$Gene_Cvg, levels = covs$Gene_Cvg[order(covs$good_cov)])
+
+covs %>% ggplot(aes(Exon,"crap",color  = good_cov))  + geom_point(shape = 3) + facet_wrap(  ~ Gene_Cvg, scales = "free") + ggtitle(paste('Coverage of all exons in the cancer panel for sample ', moleID[1], sep='')) + theme(plot.title = element_text(hjust = 0.5), plot.margin = unit(c(0.1, 0, 0, -0.8), "line"), panel.spacing = unit(0, "lines"), strip.text = element_text(size=5, hjust = 0), strip.background = element_rect(fill = "white", color = "white", size = 2)) + theme(axis.line.y = element_blank(), axis.ticks.y = element_blank(), strip.text.y = element_text(angle = 0)) + theme(axis.line.x = element_blank(), axis.ticks.x = element_blank(), axis.text.x  = element_blank(), axis.text.y  = element_blank()) + xlab(paste("Average Coverage is ", cvgSum$meanCvgGP[1], "X, (w/ ", cvgSum$perbasesAbove30XGP[1], "% bases > 500X)\n", "Exons Coverage w/ ", nrow(covs[covs$good_cov == TRUE,]) , " > 50X, ", nrow(covs[covs$bad_cov == TRUE,]), " < 50X", sep = '')) 
+```
+
+
+Coverage distribution of Exons of all genes
+```{r fig.width = 12, fig.height = 6, warning = FALSE}
+
+cov_tumor <- mysqlQuery("SELECT gene_exon, coverage, pairID, CONCAT(gene_exon, '_', pairID) AS id_Uniq FROM exonCov INNER JOIN sampleInfo ON sampleInfo.postprocID = exonCov.postprocID where sampleType = 'tumor' AND pairID > 0 AND pairID < 9900 AND currentStatus > 7 AND coverage > 0")
+cov_normal <- mysqlQuery("SELECT gene_exon, coverage, pairID, CONCAT(gene_exon, '_', pairID) AS id_Uniq_n FROM exonCov INNER JOIN sampleInfo ON sampleInfo.postprocID = exonCov.postprocID where sampleType = 'normal' AND pairID > 0 AND pairID < 9900 AND currentStatus > 7 and coverage > 0 GROUP BY pairID,gene_exon ORDER by sampleInfo.postprocID DESC")
+
+blacklist <- mysqlQuery("SELECT lowCvgExon FROM lowCvgExon WHERE captureKit = 'cancer'")
+blacklist <- unlist(strsplit(blacklist$lowCvgExon, "; "))
+cov_tumor <- cov_tumor[ ! cov_tumor$gene_exon %in% blacklist, ]
+cov_normal <- cov_normal[ ! cov_normal$gene_exon %in% blacklist, ]
+
+cov4plot <- merge(cov_tumor, cov_normal, by.x='id_Uniq', by.y='id_Uniq_n')[, c(2,5,3,6,4)]
+cov4plot$gene_exon.y <- sub("-.*", "", cov4plot$gene_exon.y)
+cov4plot <- mutate(cov4plot, log_ratio = log2(cov4plot$coverage.x / cov4plot$coverage.y))
+
+ggplot(cov4plot, aes(x=gene_exon.y, y=log_ratio)) + geom_boxplot()
+
+```
+
+
+Coverage distribution of Exons of certain gene
+```{r}
+
+cov_mycn <- mysqlQuery("SELECT CONCAT(gene_exon, '\n', chr, ':', start, '-', stop) AS gene_exon, coverage, sampleID FROM exonCov INNER JOIN sampleInfo ON sampleInfo.postprocID = exonCov.postprocID where gene_exon like 'MYCN-%' AND sampleType = 'tumor' AND currentStatus > 7")
+cov_mycn$hline <- cov_mycn[ which(cov_mycn$sampleID == moleID[1]),]$coverage
+
+ggplot(cov_mycn, aes(x= gene_exon, y=coverage)) + geom_boxplot() +  scale_y_log10( breaks = scales::trans_breaks("log10", function(x) 10^x), labels = scales::trans_format("log10", scales::math_format(10^.x)) ) + geom_errorbar(aes(width=.5, ymax=hline, ymin=hline), colour="#AA0000")
+
+```
+
+
+
+Coverage distribution of Exons of certain gene
+
+```{r}
+
+cov_gata1 <- mysqlQuery("SELECT CONCAT(gene_exon, '\n', chr, ':', start, '-', stop) AS gene_exon, coverage, sampleID FROM exonCov INNER JOIN sampleInfo ON sampleInfo.postprocID = exonCov.postprocID where gene_exon like 'GATA1-%' AND sampleType = 'tumor' AND currentStatus > 7")
+cov_gata1$hline <- cov_gata1[ which(cov_gata1$sampleID == moleID[1]),]$coverage
+
+ggplot(cov_gata1, aes(x= gene_exon, y=coverage)) + geom_boxplot() +  scale_y_log10( breaks = scales::trans_breaks("log10", function(x) 10^x), labels = scales::trans_format("log10", scales::math_format(10^.x)) )  + geom_errorbar(aes(width=.5, ymax=hline, ymin=hline), colour="#AA0000")
+
+```
+
